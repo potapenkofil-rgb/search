@@ -152,3 +152,25 @@ def test_removed_config_feed_is_disabled(tmp_path, monkeypatch):
     assert app.db.arm("rss:https://www.fl.ru/rss/all.xml")["active"] == 0
     asyncio.run(app.http.aclose())
     asyncio.run(app.companies.http.aclose())
+
+
+def test_reflection_can_call_parser(tmp_path, monkeypatch):
+    import sys
+    from leadhunter.reflect import run_parser_requests
+
+    app = make_app(tmp_path, monkeypatch)
+    script = tmp_path / "p.py"
+    script.write_text("import json\nprint(json.dumps([{'name': 'Шиномонтаж Колесо', 'phone': '+7 5'}], ensure_ascii=False))\n", encoding="utf-8")
+    app.companies.parser.cfg = {"enabled": True, "command": f"{sys.executable} {script} {{niche}} {{city}}", "daily_limit": 100, "per_request_limit": 20}
+
+    async def scenario():
+        changes = await run_parser_requests(app, [{"niche": "шиномонтаж", "city": "Казань", "limit": 10}])
+        assert changes and "1 компаний" in changes[0]
+        row = app.db.one("SELECT * FROM candidates WHERE provider = 'twogis_parser'")
+        assert row["name"] == "Шиномонтаж Колесо" and row["arm_id"] == "niche:шиномонтаж|Казань"
+        await app.command("/parse шиномонтаж | Казань 5", "1")
+        assert "В очередь" in app.bot.sent[-1][0]
+        await app.companies.http.aclose()
+        await app.http.aclose()
+
+    asyncio.run(scenario())

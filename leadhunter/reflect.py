@@ -63,6 +63,18 @@ def build_prompt(app, since: float) -> tuple[str, dict]:
     sections.append("Стоп-слова: " + ", ".join(memory.keywords("exclude")[:60]))
     sections.append("Запросы hh.ru: " + ", ".join(a["params"]["query"] for a in db.arms(kind="order", source="hh")))
     sections.append("Запросы поиска чатов: " + ", ".join(db.get("chat_queries", [])))
+    parser = getattr(getattr(app, "companies", None), "parser", None)
+    if parser and parser.enabled:
+        sections.append(parser.describe())
+        nosite = db.all(
+            "SELECT json_extract(l.data, '$.company.niche') AS niche, f.verdict AS v, COUNT(*) AS n FROM leads l "
+            "JOIN feedback f ON f.lead_id = l.id WHERE l.kind = 'company' AND json_extract(l.data, '$.audit') IS NULL "
+            "GROUP BY niche, v"
+        )
+        if nosite:
+            sections.append("Оценки лидов «нет сайта» по нишам: " + json.dumps([dict(r) for r in nosite], ensure_ascii=False))
+    else:
+        sections.append("Парсер 2ГИС недоступен, parser_requests оставь пустым.")
     return "\n\n".join(sections), facts
 
 
@@ -116,6 +128,21 @@ def apply(app, result: dict) -> list[str]:
     return changes
 
 
+async def run_parser_requests(app, requests: list[dict]) -> list[str]:
+    companies = getattr(app, "companies", None)
+    if not companies or not companies.parser.enabled:
+        return []
+    out = []
+    for req in requests[:3]:
+        niche = (req.get("niche") or "").strip()
+        city = (req.get("city") or "").strip()
+        if not niche or not city or companies.parser.left_today() <= 0:
+            continue
+        added = await companies.parser_request(niche, city, int(req.get("limit") or 20))
+        out.append(f"парсер 2ГИС: «{niche}» в городе {city} — {added} компаний без сайта в очередь")
+    return out
+
+
 async def reflect(app) -> str:
     db = app.db
     since = float(db.get("last_reflection", time.time() - 86400))
@@ -128,6 +155,7 @@ async def reflect(app) -> str:
         if result:
             changes = apply(app, result)
             report = result.get("report") or ""
+            changes += await run_parser_requests(app, result.get("parser_requests") or [])
     for name, (old, new, trash_rate) in app.memory.adapt_thresholds().items():
         label = "компании" if name == "notify_company" else "заказы"
         changes.append(f"порог «{label}» {old} → {new} (мусора {int(trash_rate * 100)}%)")

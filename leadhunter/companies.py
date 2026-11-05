@@ -10,6 +10,7 @@ from .db import DB
 from .discovery import Company, discover, exhausted
 from .llm import LLM, BudgetExceeded
 from .memory import Memory
+from .parser import ParserTool
 from .prompts import COMPANY_SCHEMA, COMPANY_SYSTEM
 from .settings import Settings
 from .util import domain_of, domain_matches, log
@@ -26,6 +27,7 @@ class Companies:
         self.audit_cfg = settings.section("audit")
         self.disc_cfg = settings.section("discovery")
         self.shooter = Screenshotter() if self.audit_cfg.get("screenshot") else None
+        self.parser = ParserTool(settings.section("parser"), db)
         self.shots_dir = settings.data_dir / "shots"
         self.shots_dir.mkdir(parents=True, exist_ok=True)
 
@@ -88,6 +90,27 @@ class Companies:
             log.info("discovery %s: +%d", arm["label"], added)
             total += added
         return total
+
+    async def parser_request(self, niche: str, city: str, limit: int, origin: str = "reflection") -> int:
+        if not self.parser.enabled:
+            return 0
+        niche = niche.strip().lower()
+        city = city.strip()
+        if not niche or not city:
+            return 0
+        self.memory.add_niche_arm(niche, city, origin=origin)
+        arm_id = f"niche:{niche}|{city}"
+        added = 0
+        for company in await self.parser.run(niche, city, limit):
+            company = self._prepare(company)
+            if not company:
+                continue
+            key = company.key(self.settings.config.get("social_domains", []))
+            if self.db.is_seen(f"lead:{key}"):
+                continue
+            if self.db.enqueue_candidate(key, arm_id, company.provider, company.name, company.website, company.to_dict()):
+                added += 1
+        return added
 
     async def audit_once(self) -> int:
         batch = int(self.settings.section("schedule").get("audit_batch", 15))

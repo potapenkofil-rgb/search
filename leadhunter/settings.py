@@ -108,6 +108,15 @@ DEFAULTS = {
         ],
         "classify_batch": 8,
     },
+    "parser": {
+        "enabled": False,
+        "command": "",
+        "workdir": "",
+        "timeout_seconds": 900,
+        "daily_limit": 300,
+        "per_request_limit": 50,
+        "fields": {},
+    },
     "skip_domains": [
         "avito.ru", "2gis.ru", "2gis.com", "yandex.ru", "ya.ru", "google.com", "goo.gl",
         "prodoctorov.ru", "zoon.ru", "flamp.ru", "yell.ru", "tripadvisor.ru", "tripadvisor.com",

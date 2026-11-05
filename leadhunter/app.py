@@ -31,6 +31,7 @@ HELP = """<b>LeadHunter</b> — ищу компании с плохими сай
 /digest — сводка сейчас
 /reflect — разбор итогов сейчас
 /audit URL — проверить сайт вручную
+/parse ниша | город [N] — компании без сайта через парсер 2ГИС
 /lead N — показать лид N
 /addniche ниша — новая ниша во всех городах
 /addcity Город — новый город для всех ниш
@@ -217,6 +218,19 @@ class App:
         lead_id = await self.companies.manual(url)
         if not lead_id:
             await self.bot.send("Не получилось оценить сайт")
+
+    async def cmd_parse(self, arg: str) -> None:
+        if not self.companies.parser.enabled:
+            await self.bot.send("Парсер 2ГИС не подключён: секция parser в config.yaml")
+            return
+        match = re.match(r"^(.+?)\s*\|\s*(.+?)(?:\s+(\d+))?$", arg)
+        if not match:
+            await self.bot.send("Формат: /parse стоматология | Казань 30")
+            return
+        niche, city, limit = match.group(1), match.group(2), int(match.group(3) or 20)
+        await self.bot.send(f"Запускаю парсер: {esc(niche)} · {esc(city)}, до {limit} компаний…")
+        added = await self.companies.parser_request(niche, city, limit, origin="user")
+        await self.bot.send(f"В очередь на оценку: {added} компаний без сайта. Подходящие пришлю. Лимит на сегодня: ещё {self.companies.parser.left_today()}")
 
     async def cmd_lead(self, arg: str) -> None:
         lead = self.db.lead(int(arg)) if arg.isdigit() else None

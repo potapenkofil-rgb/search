@@ -62,3 +62,11 @@ orders:
     - telegram бот
     - автоматизация бизнес-процессов
     - редизайн сайта
+
+parser:
+  enabled: false
+  command: "python3 /opt/2gis-parser/main.py --query {niche} --city {city} --limit {limit} --json"
+  workdir: /opt/2gis-parser
+  timeout_seconds: 900
+  daily_limit: 300
+  per_request_limit: 50

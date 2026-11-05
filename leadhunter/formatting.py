@@ -15,7 +15,7 @@ CATEGORY_NAMES = {
     "other": "другое",
 }
 
-PROVIDER_NAMES = {"osm": "OpenStreetMap", "twogis": "2ГИС", "yandex": "Яндекс Карты", "manual": "ручной аудит"}
+PROVIDER_NAMES = {"osm": "OpenStreetMap", "twogis": "2ГИС", "twogis_parser": "2ГИС (парсер)", "yandex": "Яндекс Карты", "manual": "ручной аудит"}
 
 
 def keyboard(lead_id: int, chosen: str | None = None) -> dict:

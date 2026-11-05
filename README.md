@@ -125,6 +125,39 @@ docker compose up -d --build
 docker compose run --rm -it leadhunter python -m leadhunter tg-login
 ```
 
+### Установка на VPS одной командой
+
+```bash
+git clone -b claude/pensive-volta-nx0nwj https://github.com/potapenkofil-rgb/search.git /tmp/lh && sudo bash /tmp/lh/deploy/install.sh
+```
+
+Скрипт ставит Python-окружение в `/opt/leadhunter`, создаёт пользователя `leadhunter` и systemd-сервис.
+Если репозиторий приватный, клонируй с токеном или deploy-ключом. Дальше заполни `.env` и `config.yaml`.
+
+### Свой парсер 2ГИС как инструмент модели
+
+Если на сервере есть парсер, который достаёт из 2ГИС компании без сайта, агент может вызывать его сам,
+но только когда это нужно: на ежедневном разборе модель видит, как заходят лиды «нет сайта» по нишам,
+и решает, по какой нише и городу запустить парсер и сколько взять. Ограничения — дневной лимит и лимит на запрос.
+Вручную: `/parse стоматология | Казань 30`.
+
+В `config.yaml`:
+
+```yaml
+parser:
+  enabled: true
+  command: "python3 /opt/2gis-parser/main.py --query {niche} --city {city} --limit {limit} --json"
+  workdir: /opt/2gis-parser
+  daily_limit: 300
+  per_request_limit: 50
+```
+
+Плейсхолдеры `{niche}`, `{query}`, `{city}`, `{limit}` подставляются отдельными аргументами, без shell.
+Парсер должен печатать в stdout JSON-массив, JSON-строки или CSV. Поля узнаются автоматически
+(`name`/`название`, `phone`/`телефон`, `address`/`адрес`, `rubric`/`категория`, `site`/`сайт`, `id`);
+нестандартные имена задаются в `parser.fields`, например `fields: {name: [firm_title]}`.
+Пользователь `leadhunter` должен иметь права на запуск парсера.
+
 ### Скриншоты сайтов (опционально)
 
 ```bash

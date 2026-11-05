@@ -1,11 +1,21 @@
+name: leadhunter
+
 services:
   leadhunter:
     build:
       context: .
       args:
         SCREENSHOTS: "0"
+    container_name: leadhunter
     env_file: .env
     volumes:
       - ./data:/app/data
       - ./config.yaml:/app/config.yaml:ro
     restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

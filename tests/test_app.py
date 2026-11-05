@@ -125,3 +125,30 @@ def test_low_score_goes_to_digest(tmp_path, monkeypatch):
         await app.http.aclose()
 
     asyncio.run(scenario())
+
+
+def test_hourly_alert_cap(tmp_path, monkeypatch):
+    app = make_app(tmp_path, monkeypatch)
+    app.settings.config["thresholds"]["max_alerts_per_hour"] = 2
+
+    async def scenario():
+        ids = []
+        for i in range(4):
+            ids.append(app.db.add_lead("order", "hh:x", "hh", f"h{i}", f"Заказ {i}", None, {"post": {}, "source_label": "hh"}, {"summary": "бот", "category": "bot"}, 90))
+        for lead_id in ids:
+            await app.deliver(lead_id)
+        statuses = [app.db.lead(i)["status"] for i in ids]
+        assert statuses == ["sent", "sent", "digest", "digest"]
+        await app.companies.http.aclose()
+        await app.http.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_removed_config_feed_is_disabled(tmp_path, monkeypatch):
+    app = make_app(tmp_path, monkeypatch)
+    app.db.ensure_arm("rss:https://www.fl.ru/rss/all.xml", "order", "rss", "FL.ru", {"url": "https://www.fl.ru/rss/all.xml"})
+    app.memory.bootstrap()
+    assert app.db.arm("rss:https://www.fl.ru/rss/all.xml")["active"] == 0
+    asyncio.run(app.http.aclose())
+    asyncio.run(app.companies.http.aclose())

@@ -27,8 +27,12 @@ class Memory:
         for city in market.get("cities", []):
             for niche in market.get("niches", []):
                 self.add_niche_arm(niche, city, origin="config")
+        feeds = {f"rss:{feed['url']}" for feed in orders.get("rss", [])}
         for feed in orders.get("rss", []):
             self.db.ensure_arm(f"rss:{feed['url']}", "order", "rss", feed.get("name") or feed["url"], {"url": feed["url"]})
+        for arm in self.db.arms(kind="order", source="rss"):
+            if arm["origin"] == "config" and arm["id"] not in feeds:
+                self.db.set_arm_active(arm["id"], False)
         for chat in orders.get("telegram_chats", []):
             self.add_chat_arm(chat, origin="config")
         for query in orders.get("hh_queries", []):

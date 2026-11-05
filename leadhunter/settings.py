@@ -48,6 +48,7 @@ DEFAULTS = {
         "min_threshold": 40,
         "max_threshold": 90,
         "target_alerts_per_day": 15,
+        "max_alerts_per_hour": 4,
     },
     "audit": {
         "pagespeed": True,
@@ -72,9 +73,7 @@ DEFAULTS = {
     },
     "orders": {
         "max_age_hours": 48,
-        "rss": [
-            {"name": "FL.ru", "url": "https://www.fl.ru/rss/all.xml"},
-        ],
+        "rss": [],
         "telegram_chats": [],
         "chat_search_queries": [
             "фриланс заказы",

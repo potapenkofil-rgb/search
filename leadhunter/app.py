@@ -68,13 +68,21 @@ class App:
             return
         force = force or lead["arm_id"] == "manual"
         name = "notify_company" if lead["kind"] == "company" else "notify_order"
-        if force or lead["score"] >= self.memory.threshold(name):
+        hot = lead["score"] >= self.memory.threshold(name)
+        if hot and not force and self.alerts_last_hour() >= int(self.settings.section("thresholds").get("max_alerts_per_hour", 4)):
+            self.db.set_lead_status(lead_id, "digest")
+            return
+        if force or hot:
             message_id = await self.send_card(lead)
             self.db.set_lead_status(lead_id, "sent", notified_at=time.time(), message_id=message_id)
         elif lead["score"] >= self.memory.threshold("digest"):
             self.db.set_lead_status(lead_id, "digest")
         else:
             self.db.set_lead_status(lead_id, "low")
+
+    def alerts_last_hour(self) -> int:
+        row = self.db.one("SELECT COUNT(*) AS n FROM leads WHERE notified_at > ? AND arm_id != 'manual'", time.time() - 3600)
+        return int(row["n"])
 
     async def send_card(self, lead: dict) -> int | None:
         text = card(lead)

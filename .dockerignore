@@ -1,0 +1,10 @@
+data/
+.deploy/
+.env
+.env.*
+!.env.example
+config.yaml
+.git/
+tests/
+__pycache__/
+*.pyc

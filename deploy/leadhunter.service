@@ -1,0 +1,15 @@
+[Unit]
+Description=LeadHunter agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=leadhunter
+WorkingDirectory=/opt/leadhunter
+ExecStart=/opt/leadhunter/.venv/bin/python -m leadhunter run
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

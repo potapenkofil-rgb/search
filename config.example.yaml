@@ -1,0 +1,65 @@
+market:
+  cities:
+    - Москва
+    - Санкт-Петербург
+    - Казань
+    - Екатеринбург
+    - Новосибирск
+  niches:
+    - стоматология
+    - медицинский центр
+    - ветклиника
+    - автосервис
+    - салон красоты
+    - фитнес
+    - гостиница
+    - юридические услуги
+    - агентство недвижимости
+    - строительная компания
+    - мебель
+    - образование и курсы
+    - типография
+    - турагентство
+    - бухгалтерия
+  include_no_website: true
+
+schedule:
+  timezone: Europe/Moscow
+  rss_minutes: 10
+  telegram_minutes: 3
+  hh_minutes: 30
+  discovery_minutes: 60
+  audit_minutes: 5
+  audit_batch: 15
+  digest_hour: 19
+  reflect_hour: 23
+  chat_discovery_hour: 12
+
+thresholds:
+  notify_company: 65
+  notify_order: 60
+  digest: 40
+  target_alerts_per_day: 15
+
+audit:
+  pagespeed: true
+  screenshot: false
+  respect_robots: true
+  min_signal_score: 5
+
+discovery:
+  providers: [osm, twogis, yandex]
+  arms_per_run: 3
+
+orders:
+  max_age_hours: 48
+  rss:
+    - name: FL.ru
+      url: https://www.fl.ru/rss/all.xml
+  telegram_chats: []
+  hh_queries:
+    - разработка сайта
+    - создание сайта
+    - telegram бот
+    - автоматизация бизнес-процессов
+    - редизайн сайта

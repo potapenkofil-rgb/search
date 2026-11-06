@@ -82,36 +82,54 @@ def company_brief(lead: dict) -> str:
     company = data.get("company") or {}
     audit = data.get("audit") or {}
     icon = "🏚" if audit else "📍"
-    where = ", ".join(x for x in (company.get("city"), company.get("niche")) if x)
-    head = f"{icon} <b>{esc(clip(company.get('name') or lead['title'], 60))}</b> · {lead['score']}"
-    if where:
-        head += f" · {esc(where)}"
-    lines = [head]
+    lines = [f"{icon} <b>{esc(clip(company.get('name') or lead['title'], 70))}</b> · {lead['score']}/100"]
+    meta = " · ".join(esc(x) for x in (company.get("city"), company.get("niche"), clip(company.get("address"), 40)) if x)
+    if meta:
+        lines.append(meta)
+    lines.append("")
+    if a.get("company_summary"):
+        lines.append(esc(clip(a["company_summary"], 160)))
     if audit:
-        problems = (a.get("problems") or audit.get("signals") or [])[:3]
-        verdict = clip(a.get("site_verdict") or "", 80)
-        tail = ", ".join(clip(p, 40) for p in problems)
-        lines.append(esc(f"{verdict}: {tail}" if verdict and tail else verdict or tail))
+        site = audit.get("url") or company.get("website") or ""
+        verdict = clip(a.get("site_verdict") or "", 100)
+        lines.append(f"{esc(verdict)}" if verdict else "Сайт:")
+        if site:
+            lines.append(f"🔗 {esc(re.sub(r'^https?://', '', site).rstrip('/'))}")
+        for problem in (a.get("problems") or audit.get("signals") or [])[:4]:
+            lines.append(f"• {esc(clip(problem, 70))}")
     else:
         socials = [re.sub(r"^https?://(www\.)?", "", x).rstrip("/") for x in (company.get("socials") or [])]
         lines.append("Сайта нет" + (f", только {esc(clip(', '.join(socials[:2]), 50))}" if socials else ""))
     if a.get("opportunity"):
-        lines.append(f"🔧 {esc(clip(a['opportunity'], 90))}")
-    return "\n".join(x for x in lines if x.strip())
+        lines.append(f"🔧 {esc(clip(a['opportunity'], 110))}")
+    contacts = [company.get("phone")] + [company.get("email")] + list(audit.get("emails") or [])
+    contacts = [c for i, c in enumerate(contacts) if c and c not in contacts[:i]][:2]
+    if contacts:
+        lines.append("📞 " + esc(" · ".join(contacts)))
+    return "\n".join(lines)
 
 
 def order_brief(lead: dict) -> str:
+    data = lead["data"]
     a = lead["analysis"]
+    post = data.get("post") or {}
     category = CATEGORY_NAMES.get(a.get("category"), a.get("category") or "заказ")
-    lines = [f"💼 <b>{esc(clip(a.get('summary') or lead['title'], 90))}</b>"]
-    meta = [f"{esc(category)} · {lead['score']}"]
+    lines = [f"💼 <b>{esc(clip(a.get('summary') or lead['title'], 120))}</b>"]
+    lines.append(f"{esc(category)} · {lead['score']}/100 · {esc(clip(data.get('source_label', lead['source']), 40))}")
+    facts = []
     if a.get("budget"):
-        meta.append(esc(clip(a["budget"], 30)))
+        facts.append("💰 " + esc(clip(a["budget"], 30)))
     if a.get("deadline"):
-        meta.append(esc(clip(a["deadline"], 30)))
-    if a.get("contact"):
-        meta.append(esc(clip(a["contact"], 40)))
-    lines.append(" · ".join(meta))
+        facts.append("⏱ " + esc(clip(a["deadline"], 30)))
+    contact = a.get("contact") or post.get("author")
+    if contact:
+        facts.append("👤 " + esc(clip(contact, 40)))
+    if facts:
+        lines.append(" · ".join(facts))
+    text = clip(post.get("text") or post.get("title"), 260)
+    if text:
+        lines.append("")
+        lines.append(f"<blockquote>{esc(text)}</blockquote>")
     return "\n".join(lines)
 
 

@@ -5,6 +5,7 @@ import httpx
 from leadhunter import settings as settings_module
 from leadhunter.app import App
 from leadhunter.discovery import Company
+from leadhunter.formatting import card
 
 from test_core import OLD_SITE
 
@@ -94,8 +95,9 @@ def test_company_flow_feedback_and_reflection(tmp_path, monkeypatch):
         assert made == 1
         text, markup = app.bot.sent[-1]
         assert "Улыбка" in text and "84" in text and "нет мобильной версии" in text
-        assert len(text.splitlines()) <= 3
-        assert "Почему оценка такая" not in text
+        assert len(text.splitlines()) < len(card(app.db.lead(int(markup["inline_keyboard"][0][0]["callback_data"].split(":")[1]))).splitlines())
+        assert "Почему оценка такая" not in text and "Как нашлось" not in text
+        assert "info@ulybka.ru" in text and "ulybka.ru" in text
         lead_id = int(markup["inline_keyboard"][0][0]["callback_data"].split(":")[1])
         assert "ulybka.ru" in markup["inline_keyboard"][-1][-1]["url"]
         await app.callback(f"x:{lead_id}:1", {"message": {"chat": {"id": 1}, "message_id": 5}})

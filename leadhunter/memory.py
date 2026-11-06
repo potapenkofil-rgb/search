@@ -35,8 +35,12 @@ class Memory:
                 self.db.set_arm_active(arm["id"], False)
         for chat in orders.get("telegram_chats", []):
             self.add_chat_arm(chat, origin="config")
+        queries = {f"hh:{q}" for q in orders.get("hh_queries", [])}
         for query in orders.get("hh_queries", []):
             self.db.ensure_arm(f"hh:{query}", "order", "hh", f"hh.ru: {query}", {"query": query})
+        for arm in self.db.arms(kind="order", source="hh"):
+            if arm["origin"] == "config" and arm["id"] not in queries:
+                self.db.set_arm_active(arm["id"], False)
         self.db.ensure_arm("manual", "company", "manual", "ручной аудит", {}, origin="user", active=0)
         if self.db.get("keywords:include") is None:
             self.db.put("keywords:include", orders.get("include_keywords", []))

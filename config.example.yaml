@@ -56,12 +56,7 @@ orders:
   max_age_hours: 48
   rss: []
   telegram_chats: []
-  hh_queries:
-    - разработка сайта
-    - создание сайта
-    - telegram бот
-    - автоматизация бизнес-процессов
-    - редизайн сайта
+  hh_queries: []
 
 parser:
   enabled: false

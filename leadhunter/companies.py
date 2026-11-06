@@ -185,6 +185,7 @@ class Companies:
         if audit:
             summary = audit.summary()
             summary.pop("emails", None)
+            summary.pop("phones", None)
             parts.append("Аудит сайта:\n" + json.dumps(summary, ensure_ascii=False))
             if audit.excerpt:
                 parts.append("Текст главной страницы (начало):\n" + audit.excerpt[:1500])

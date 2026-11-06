@@ -76,6 +76,45 @@ def clip(value: str | None, limit: int) -> str:
     return value if len(value) <= limit else value[: limit - 1].rstrip() + "…"
 
 
+PHONE_RE = re.compile(r"(?<!\d)(?:\+?7|8)[\s\-().]{0,4}(?:\d[\s\-().]{0,4}){9}\d(?!\d)")
+
+
+def phone_key(raw: str | None) -> str | None:
+    digits = re.sub(r"\D", "", raw or "")
+    if len(digits) == 10:
+        digits = "7" + digits
+    elif len(digits) == 11 and digits[0] in "78":
+        digits = "7" + digits[1:]
+    else:
+        return None
+    return digits if digits[1] not in "01" else None
+
+
+def phone_text(raw: str | None) -> str:
+    key = phone_key(raw)
+    if not key:
+        return (raw or "").strip()
+    return f"+7 {key[1:4]} {key[4:7]}-{key[7:9]}-{key[9:]}"
+
+
+def normalize_phones(values, limit: int = 4) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not value:
+            continue
+        key = phone_key(value)
+        shown = phone_text(value) if key else re.sub(r"[^\d+()\-\s]", "", str(value)).strip()
+        ident = key or re.sub(r"\D", "", shown)
+        if len(ident) < 6 or ident in seen:
+            continue
+        seen.add(ident)
+        out.append(shown)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def text_hash(value: str) -> str:
     norm = re.sub(r"\W+", " ", (value or "").lower()).strip()[:400]
     return hashlib.sha1(norm.encode("utf-8")).hexdigest()

@@ -25,7 +25,8 @@ OLD_SITE = """<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
 <table><tr><td>Лечение</td></tr></table><table><tr><td>Цены</td></tr></table><table><tr><td>Контакты</td></tr></table>
 <center>Добро пожаловать</center>
 <embed src="banner.swf">
-<p>Мы лечим зубы с 1998 года. Звоните: +7 900 000-00-00. Пишите <a href="mailto:info@ulybka.ru">info@ulybka.ru</a></p>
+<p>Мы лечим зубы с 1998 года. Звоните: +7 900 000-00-00 или 8 (843) 215-55-50. Пишите <a href="mailto:info@ulybka.ru">info@ulybka.ru</a></p>
+<p><a href="tel:+79520982033">+7 (952) 098-20-33</a></p>
 <p>""" + "Текст о клинике. " * 40 + """</p>
 <p>© 2014 Стоматология Улыбка</p></body></html>"""
 
@@ -59,6 +60,7 @@ def test_analyze_old_site():
     codes = {s.code for s in audit.signals}
     assert {"no_viewport", "old_copyright", "old_jquery", "flash", "deprecated_tags", "table_layout", "old_doctype", "old_cms"} <= codes
     assert "info@ulybka.ru" in audit.emails
+    assert audit.phones == ["+7 952 098-20-33", "+7 900 000-00-00", "+7 843 215-55-50"]
     assert audit.score >= 80
 
 

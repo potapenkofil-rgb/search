@@ -4,12 +4,12 @@ import time
 from dataclasses import dataclass, field
 from datetime import date
 from urllib import robotparser
-from urllib.parse import urljoin
+from urllib.parse import unquote, urljoin
 
 import httpx
 from bs4 import BeautifulSoup
 
-from .util import USER_AGENT, domain_of, log
+from .util import PHONE_RE, USER_AGENT, domain_of, log, normalize_phones
 
 
 MAX_BYTES = 3_000_000
@@ -56,6 +56,7 @@ class Audit:
     headings: list[str] = field(default_factory=list)
     excerpt: str = ""
     emails: list[str] = field(default_factory=list)
+    phones: list[str] = field(default_factory=list)
     socials: list[str] = field(default_factory=list)
     tech: list[str] = field(default_factory=list)
     signals: list[Signal] = field(default_factory=list)
@@ -88,6 +89,7 @@ class Audit:
             "signals": [s.text for s in sorted(self.signals, key=lambda s: -s.weight)],
             "signal_score": self.score,
             "emails": self.emails,
+            "phones": self.phones,
             "socials": self.socials,
             "error": self.error,
         }
@@ -114,12 +116,15 @@ def analyze_html(audit: Audit, markup: str, today: date | None = None) -> None:
     audit.description = (desc_tag.get("content") or "").strip()[:300] if desc_tag else ""
     audit.headings = [h.get_text(" ", strip=True)[:120] for h in soup.find_all(["h1", "h2"]) if h.get_text(strip=True)][:10]
 
+    tel_links: list[str] = []
     for a in soup.find_all("a", href=True):
         href = a["href"].strip()
         if href.lower().startswith("mailto:"):
             email = href[7:].split("?")[0].strip()
             if email and email not in audit.emails:
                 audit.emails.append(email)
+        elif href.lower().startswith("tel:"):
+            tel_links.append(unquote(href[4:].split("?")[0]).strip())
         else:
             dom = domain_of(href) if href.startswith("http") else None
             if dom and any(dom == s or dom.endswith("." + s) for s in ("vk.com", "vk.ru", "t.me", "instagram.com", "wa.me", "ok.ru")):
@@ -136,6 +141,7 @@ def analyze_html(audit: Audit, markup: str, today: date | None = None) -> None:
         tag.decompose()
     text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
     audit.excerpt = text[:1500]
+    audit.phones = normalize_phones(tel_links + PHONE_RE.findall(text))
 
     if any(p in low for p in PARKED_PATTERNS) and len(text) < 3000:
         audit.add("parked", 30, "домен припаркован или продаётся, сайта по факту нет")

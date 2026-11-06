@@ -58,6 +58,7 @@ class Company:
     address: str = ""
     website: str | None = None
     phone: str | None = None
+    phones: list[str] = field(default_factory=list)
     email: str | None = None
     socials: list[str] = field(default_factory=list)
 
@@ -101,6 +102,7 @@ def parse_overpass(data: dict, city: str, niche: str) -> list[Company]:
         socials = [tags[k] for k in ("contact:vk", "contact:instagram", "contact:telegram", "contact:facebook") if tags.get(k)]
         address = ", ".join(x for x in (tags.get("addr:street"), tags.get("addr:housenumber")) if x)
         category = next((f"{k}={tags[k]}" for k in ("amenity", "shop", "office", "craft", "healthcare", "leisure", "tourism") if tags.get(k)), "")
+        raw_phones = [p.strip() for key in ("phone", "contact:phone", "contact:mobile") for p in (tags.get(key) or "").split(";") if p.strip()]
         out.append(
             Company(
                 provider="osm",
@@ -111,7 +113,8 @@ def parse_overpass(data: dict, city: str, niche: str) -> list[Company]:
                 category=category,
                 address=address,
                 website=normalize_url(website),
-                phone=tags.get("phone") or tags.get("contact:phone"),
+                phone=raw_phones[0] if raw_phones else None,
+                phones=raw_phones[:4],
                 email=tags.get("email") or tags.get("contact:email"),
                 socials=socials,
             )
@@ -137,7 +140,7 @@ def parse_twogis(data: dict, city: str, niche: str) -> list[Company]:
     out = []
     for item in (data.get("result") or {}).get("items", []):
         website = None
-        phone = None
+        phones = []
         email = None
         socials = []
         for group in item.get("contact_groups") or []:
@@ -147,8 +150,10 @@ def parse_twogis(data: dict, city: str, niche: str) -> list[Company]:
                 if kind == "website" and not website:
                     text = contact.get("text") or ""
                     website = normalize_url(text if "." in text and "2gis" not in text else contact.get("value"))
-                elif kind == "phone" and not phone:
-                    phone = contact.get("value") or value
+                elif kind == "phone":
+                    number = contact.get("value") or value
+                    if number and number not in phones:
+                        phones.append(number)
                 elif kind == "email" and not email:
                     email = value
                 elif kind in ("vkontakte", "instagram", "telegram", "whatsapp", "facebook"):
@@ -164,7 +169,8 @@ def parse_twogis(data: dict, city: str, niche: str) -> list[Company]:
                 category=rubrics,
                 address=item.get("address_name") or "",
                 website=website,
-                phone=phone,
+                phone=phones[0] if phones else None,
+                phones=phones[:4],
                 email=email,
                 socials=socials[:4],
             )
@@ -222,6 +228,7 @@ def parse_yandex(data: dict, city: str, niche: str) -> list[Company]:
                 address=meta.get("address") or "",
                 website=normalize_url(meta.get("url")),
                 phone=phones[0].get("formatted") if phones else None,
+                phones=[p.get("formatted") for p in phones[:4] if p.get("formatted")],
             )
         )
     return out

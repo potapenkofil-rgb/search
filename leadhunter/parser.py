@@ -102,6 +102,7 @@ def to_companies(records: list[dict], niche: str, city: str, fields: dict | None
         socials_raw = _pick(record, keys["socials"])
         socials = [s.strip() for s in re.split(r"[,\s]+", _flat(socials_raw)) if s.strip().startswith("http")] if socials_raw else []
         phone = _pick(record, keys["phone"])
+        phones = [p.strip() for p in _flat(phone).split(",") if p.strip()] if phone else []
         email = _pick(record, keys["email"])
         out.append(
             Company(
@@ -113,7 +114,8 @@ def to_companies(records: list[dict], niche: str, city: str, fields: dict | None
                 category=_flat(_pick(record, keys["category"]) or ""),
                 address=_flat(_pick(record, keys["address"]) or ""),
                 website=normalize_url(_flat(_pick(record, keys["website"]) or "")) if _pick(record, keys["website"]) else None,
-                phone=_flat(phone).split(",")[0].strip() if phone else None,
+                phone=phones[0] if phones else None,
+                phones=phones[:4],
                 email=_flat(email).split(",")[0].strip() if email else None,
                 socials=socials[:4],
             )

@@ -1,7 +1,7 @@
 import re
 
 from .memory import VERDICTS
-from .util import clip, esc
+from .util import clip, esc, normalize_phones
 
 CATEGORY_NAMES = {
     "site": "сайт",
@@ -76,6 +76,15 @@ def keyboard(lead_id: int, chosen: str | None = None, expanded: bool = False, ur
     return {"inline_keyboard": rows}
 
 
+def contacts_of(lead: dict) -> tuple[list[str], list[str]]:
+    company = lead["data"].get("company") or {}
+    audit = lead["data"].get("audit") or {}
+    phones = normalize_phones([company.get("phone")] + list(company.get("phones") or []) + list(audit.get("phones") or []), limit=4)
+    emails = [company.get("email")] + list(audit.get("emails") or [])
+    emails = [e for i, e in enumerate(emails) if e and e not in emails[:i]][:3]
+    return phones, emails
+
+
 def company_brief(lead: dict) -> str:
     data = lead["data"]
     a = lead["analysis"]
@@ -88,24 +97,25 @@ def company_brief(lead: dict) -> str:
         lines.append(meta)
     lines.append("")
     if a.get("company_summary"):
-        lines.append(esc(clip(a["company_summary"], 160)))
+        lines.append(esc(clip(a["company_summary"], 220)))
     if audit:
         site = audit.get("url") or company.get("website") or ""
-        verdict = clip(a.get("site_verdict") or "", 100)
+        verdict = clip(a.get("site_verdict") or "", 170)
         lines.append(f"{esc(verdict)}" if verdict else "Сайт:")
         if site:
             lines.append(f"🔗 {esc(re.sub(r'^https?://', '', site).rstrip('/'))}")
         for problem in (a.get("problems") or audit.get("signals") or [])[:4]:
-            lines.append(f"• {esc(clip(problem, 70))}")
+            lines.append(f"• {esc(clip(problem, 100))}")
     else:
         socials = [re.sub(r"^https?://(www\.)?", "", x).rstrip("/") for x in (company.get("socials") or [])]
         lines.append("Сайта нет" + (f", только {esc(clip(', '.join(socials[:2]), 50))}" if socials else ""))
     if a.get("opportunity"):
-        lines.append(f"🔧 {esc(clip(a['opportunity'], 110))}")
-    contacts = [company.get("phone")] + [company.get("email")] + list(audit.get("emails") or [])
-    contacts = [c for i, c in enumerate(contacts) if c and c not in contacts[:i]][:2]
-    if contacts:
-        lines.append("📞 " + esc(" · ".join(contacts)))
+        lines.append(f"🔧 {esc(clip(a['opportunity'], 150))}")
+    phones, emails = contacts_of(lead)
+    if phones:
+        lines.append("📞 " + esc(" · ".join(phones)))
+    if emails:
+        lines.append("✉️ " + esc(" · ".join(emails[:2])))
     return "\n".join(lines)
 
 
@@ -172,15 +182,11 @@ def company_card(lead: dict) -> str:
         lines.append(f"<b>Что можно сделать:</b> {esc(a['opportunity'])}")
     if a.get("reasoning"):
         lines.append(f"<b>Почему оценка такая:</b> {esc(a['reasoning'])}")
-    contacts = []
-    if company.get("phone"):
-        contacts.append(esc(company["phone"]))
-    emails = [company.get("email")] + list(audit.get("emails") or [])
-    emails = [e for i, e in enumerate(emails) if e and e not in emails[:i]]
+    phones, emails = contacts_of(lead)
+    if phones:
+        lines.append(f"<b>Телефоны:</b> {esc(' · '.join(phones))}")
     if emails:
-        contacts.append(esc(", ".join(emails[:2])))
-    if contacts:
-        lines.append(f"<b>Контакты:</b> {' · '.join(contacts)}")
+        lines.append(f"<b>Почта:</b> {esc(' · '.join(emails))}")
     provider = PROVIDER_NAMES.get(company.get("provider"), company.get("provider") or "")
     lines.append(f"<i>Как нашлось: {esc(provider)}, поиск «{esc(company.get('niche', ''))}» в городе {esc(company.get('city', ''))}</i>")
     return "\n".join(lines)

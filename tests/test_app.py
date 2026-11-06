@@ -25,6 +25,10 @@ class FakeBot:
     async def edit_markup(self, chat_id, message_id, markup):
         self.sent.append(("edit", markup))
 
+    async def edit(self, message, text, markup=None):
+        self.sent.append((text, markup))
+        return True
+
     async def close(self):
         pass
 
@@ -89,13 +93,20 @@ def test_company_flow_feedback_and_reflection(tmp_path, monkeypatch):
         made = await app.companies.audit_once()
         assert made == 1
         text, markup = app.bot.sent[-1]
-        assert "Плохой сайт · 84/100" in text and "Улыбка" in text and "нет мобильной версии" in text
+        assert "Улыбка" in text and "84" in text and "нет мобильной версии" in text
+        assert len(text.splitlines()) <= 3
+        assert "Почему оценка такая" not in text
         lead_id = int(markup["inline_keyboard"][0][0]["callback_data"].split(":")[1])
+        assert "ulybka.ru" in markup["inline_keyboard"][-1][-1]["url"]
+        await app.callback(f"x:{lead_id}:1", {"message": {"chat": {"id": 1}, "message_id": 5}})
+        full, full_markup = app.bot.sent[-1]
+        assert "Почему оценка такая" in full and "Частная стоматология" in full
+        assert full_markup["inline_keyboard"][-1][0]["text"] == "Свернуть"
         note = await app.callback(f"fb:{lead_id}:taken", {"message": {"chat": {"id": 1}, "message_id": 5}})
         assert note == "Запомнил: взял"
         assert app.db.lead(lead_id)["verdict"] == "taken"
-        await app.command("/stats", "1")
-        assert "Статистика" in app.bot.sent[-1][0]
+        await app.text("📊 Статистика", "1")
+        assert "За сутки" in app.bot.sent[-1][0]
         await app.text("не присылай сетевые клиники", "1")
         assert app.memory.directives()[0]["text"] == "не присылай сетевые клиники"
         await app.command("/reflect", "1")
@@ -104,6 +115,11 @@ def test_company_flow_feedback_and_reflection(tmp_path, monkeypatch):
         assert app.db.arm("niche:пекарни|Казань")
         await app.command("/lead_%d" % lead_id, "1")
         assert "Улыбка" in app.bot.sent[-1][0]
+        await app.text("🔍 Проверить сайт", "1")
+        assert app.db.get("pending") == "audit"
+        await app.text("ulybka.ru", "1")
+        assert app.db.get("pending") is None
+        assert "ulybka.ru" in app.bot.sent[-1][0] or "Улыбка" in app.bot.sent[-1][0]
         await app.companies.http.aclose()
         await app.http.aclose()
 
@@ -118,9 +134,11 @@ def test_low_score_goes_to_digest(tmp_path, monkeypatch):
         await app.deliver(lead_id)
         assert app.db.lead(lead_id)["status"] == "digest"
         await app.digest()
-        assert "Сводка" in app.bot.sent[-1][0] and f"/lead_{lead_id}" in app.bot.sent[-1][0]
+        text, markup = app.bot.sent[-1]
+        assert "Сводка · 1" in text
+        assert markup["inline_keyboard"][0][0]["callback_data"] == f"x:{lead_id}:0"
         await app.digest(force=True)
-        assert "пусто" in app.bot.sent[-1][0]
+        assert "Пусто" in app.bot.sent[-1][0]
         await app.companies.http.aclose()
         await app.http.aclose()
 
@@ -169,7 +187,64 @@ def test_reflection_can_call_parser(tmp_path, monkeypatch):
         row = app.db.one("SELECT * FROM candidates WHERE provider = 'twogis_parser'")
         assert row["name"] == "Шиномонтаж Колесо" and row["arm_id"] == "niche:шиномонтаж|Казань"
         await app.command("/parse шиномонтаж | Казань 5", "1")
-        assert "В очередь" in app.bot.sent[-1][0]
+        assert "в очередь" in app.bot.sent[-1][0]
+        await app.companies.http.aclose()
+        await app.http.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_menu_buttons_and_thresholds(tmp_path, monkeypatch):
+    app = make_app(tmp_path, monkeypatch)
+
+    async def scenario():
+        await app.text("⚙️ Ещё", "1")
+        rows = app.bot.sent[-1][1]["inline_keyboard"]
+        flat = {b["text"]: b["callback_data"] for row in rows for b in row}
+        assert flat["Пауза"] == "m:pause"
+        await app.callback("m:pause", {})
+        assert app.paused() is True
+        assert "Пауза" in app.bot.sent[-1][0]
+        rows = app.bot.sent[-1][1]["inline_keyboard"]
+        assert any(b["text"] == "Продолжить" for row in rows for b in row)
+        await app.callback("m:resume", {})
+        assert app.paused() is False
+
+        await app.callback("m:thresholds", {})
+        before = app.memory.threshold("notify_company")
+        await app.callback("t:notify_company:5", {"message": {"chat": {"id": 1}, "message_id": 9}})
+        assert app.memory.threshold("notify_company") == before + 5
+
+        await app.callback("m:ask:addniche", {})
+        assert app.db.get("pending") == "addniche"
+        await app.text("пекарни", "1")
+        assert app.db.arm("niche:пекарни|Казань")
+
+        await app.text("не присылай сетевые клиники", "1")
+        assert app.memory.directives()[0]["text"] == "не присылай сетевые клиники"
+        await app.text("🧠 Правила", "1")
+        rows = app.bot.sent[-1][1]["inline_keyboard"]
+        did = app.memory.directives()[0]["id"]
+        assert rows[0][0]["callback_data"] == f"d:{did}"
+        await app.callback(f"d:{did}", {})
+        assert app.memory.directives() == []
+
+        await app.companies.http.aclose()
+        await app.http.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_command_clears_pending_input(tmp_path, monkeypatch):
+    app = make_app(tmp_path, monkeypatch)
+
+    async def scenario():
+        await app.callback("m:ask:addcity", {})
+        assert app.db.get("pending") == "addcity"
+        await app.command("/stats", "1")
+        assert app.db.get("pending") is None
+        await app.text("просто заметка", "1")
+        assert app.memory.directives()[0]["text"] == "просто заметка"
         await app.companies.http.aclose()
         await app.http.aclose()
 

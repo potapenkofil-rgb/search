@@ -93,6 +93,32 @@ class Bot:
     async def edit_markup(self, chat_id: int, message_id: int, markup: dict) -> None:
         await self.call("editMessageReplyMarkup", chat_id=chat_id, message_id=message_id, reply_markup=markup)
 
+    async def edit(self, message: dict, text: str, markup: dict | None = None) -> bool:
+        chat_id = (message.get("chat") or {}).get("id")
+        message_id = message.get("message_id")
+        if not chat_id or not message_id:
+            return False
+        if message.get("photo"):
+            result = await self.call(
+                "editMessageCaption",
+                chat_id=chat_id,
+                message_id=message_id,
+                caption=clip(text, 1024),
+                parse_mode="HTML",
+                reply_markup=markup,
+            )
+        else:
+            result = await self.call(
+                "editMessageText",
+                chat_id=chat_id,
+                message_id=message_id,
+                text=clip(text, 4000),
+                parse_mode="HTML",
+                reply_markup=markup,
+                link_preview_options={"is_disabled": True},
+            )
+        return result is not None
+
     async def poll_forever(self) -> None:
         while True:
             try:

@@ -8,7 +8,7 @@ from .bot import Bot
 from .companies import Companies
 from .db import DB
 from .discovery import NICHE_TAGS
-from .formatting import card, digest_lines, keyboard
+from .formatting import brief, digest_rows, keyboard, lead_text, menu_keyboard, more_keyboard
 from .llm import LLM, BudgetExceeded
 from .memory import VERDICTS, Memory
 from .orders import Orders
@@ -20,27 +20,30 @@ from .util import clip, esc, http_client, log, normalize_url
 
 HELP = """<b>LeadHunter</b> — ищу компании с плохими сайтами и заказы на разработку.
 
-Под каждым лидом кнопки: <b>Мусор / Интересно / Взял / Сделка</b>. Жми — по ним я учусь.
-Любой текст без «/» — директива, запомню навсегда. Например: «не присылай салоны красоты».
+Кнопки снизу — всё основное. Под лидом: оценка, «Подробнее», «Открыть».
+Любой текст — директива навсегда. Например: «не присылай салоны красоты».
 
-/stats — статистика и расход
-/sources — источники и ниши с качеством
-/rules — выученные правила и твои директивы
-/forget N — удалить директиву N
-/rollback — откатить последние правила
-/digest — сводка сейчас
-/reflect — разбор итогов сейчас
-/audit URL — проверить сайт вручную
-/parse ниша | город [N] — компании без сайта через парсер 2ГИС
-/lead N — показать лид N
-/addniche ниша — новая ниша во всех городах
-/addcity Город — новый город для всех ниш
-/addchat @чат — читать Telegram-чат
-/addrss URL — новый RSS-источник
-/addhh запрос — новый запрос hh.ru
-/disable id, /enable id — выключить или включить источник
-/threshold company|order|digest N — порог отправки
-/pause, /resume — пауза поиска"""
+Команды, если удобнее ими: /stats /sources /rules /digest /reflect /audit /parse
+/lead N /addniche /addcity /addchat /addrss /addhh /forget N /rollback
+/disable id /enable id /threshold company|order|digest N /pause /resume"""
+
+ASK = {
+    "audit": "Пришли адрес сайта, проверю. Например: example.ru",
+    "addniche": "Какую нишу добавить? Например: стоматология",
+    "addcity": "Какой город добавить? Например: Казань",
+    "addchat": "Пришли @чат, который читать",
+    "parse": "Что искать парсером? Формат: ниша | город 30",
+    "addrss": "Пришли ссылку на RSS",
+}
+
+BUTTONS = {
+    "📊 Статистика": "stats",
+    "📋 Сводка": "digest",
+    "🎯 Источники": "sources",
+    "🧠 Правила": "rules",
+    "🔍 Проверить сайт": "ask:audit",
+    "⚙️ Ещё": "more",
+}
 
 
 class App:
@@ -86,34 +89,117 @@ class App:
         return int(row["n"])
 
     async def send_card(self, lead: dict) -> int | None:
-        text = card(lead)
-        markup = keyboard(lead["id"], lead.get("verdict"))
+        text = brief(lead)
+        markup = keyboard(lead["id"], lead.get("verdict"), False, lead.get("url"))
         shot = self.settings.data_dir / "shots" / f"{lead['id']}.jpg"
-        if shot.exists() and len(text) <= 1024:
-            return await self.bot.send_photo(shot.read_bytes(), text, markup)
         if shot.exists():
-            await self.bot.send_photo(shot.read_bytes(), f"Скриншот к лиду #{lead['id']}")
+            return await self.bot.send_photo(shot.read_bytes(), text, markup)
         return await self.bot.send(text, markup)
 
     async def callback(self, data: str, query: dict) -> str | None:
+        message = query.get("message") or {}
         if data.startswith("fb:"):
             _, lead_id, verdict = data.split(":", 2)
             lead = self.memory.feedback(int(lead_id), verdict)
             if not lead:
                 return "Лид не найден"
-            message = query.get("message") or {}
+            expanded = bool(self.db.get(f"expanded:{lead['id']}", False))
             if message:
-                await self.bot.edit_markup(message["chat"]["id"], message["message_id"], keyboard(lead["id"], verdict))
+                await self.bot.edit_markup(
+                    message["chat"]["id"], message["message_id"], keyboard(lead["id"], verdict, expanded, lead.get("url"))
+                )
             return f"Запомнил: {VERDICTS[verdict]}"
+        if data.startswith("x:"):
+            _, lead_id, flag = data.split(":", 2)
+            lead = self.db.lead(int(lead_id))
+            if not lead:
+                return "Лид не найден"
+            expanded = flag == "1"
+            self.db.put(f"expanded:{lead['id']}", expanded)
+            markup = keyboard(lead["id"], lead.get("verdict"), expanded, lead.get("url"))
+            text = lead_text(lead, expanded)
+            if not message or not await self.bot.edit(message, text, markup):
+                await self.bot.send(text, markup)
+            return None
+        if data.startswith("t:"):
+            _, name, delta = data.split(":", 2)
+            self.memory.set_threshold(name, self.memory.threshold(name) + int(delta))
+            if message:
+                await self.bot.edit(message, self.thresholds_text(), self.thresholds_keyboard())
+            return None
+        if data.startswith("m:"):
+            action = data.split(":", 1)[1]
+            await self.run_action(action)
+            return None
+        if data.startswith("a:"):
+            _, flag, arm_id = data.split(":", 2)
+            if not self.db.set_arm_active(arm_id, flag == "1"):
+                return "Не нашёл источник"
+            await self.cmd_sources("")
+            return "Включил" if flag == "1" else "Выключил"
+        if data.startswith("d:"):
+            removed = self.memory.remove_directive(int(data.split(":", 1)[1]))
+            if removed:
+                await self.cmd_rules("")
+            return "Удалил" if removed else "Уже нет"
         if data.startswith("addchat:"):
             username = data.split(":", 1)[1]
             added = self.memory.add_chat_arm(username)
             return f"Читаю @{username}" if added else "Уже читаю"
         return None
 
+    async def run_action(self, action: str) -> None:
+        if action.startswith("ask:"):
+            await self.ask(action.split(":", 1)[1])
+            return
+        if action == "more":
+            await self.bot.send("Что сделать?", more_keyboard(self.paused()))
+            return
+        if action == "thresholds":
+            await self.bot.send(self.thresholds_text(), self.thresholds_keyboard())
+            return
+        handler = getattr(self, f"cmd_{action}", None)
+        if handler:
+            await self.guard(handler, "")
+
+    def thresholds_text(self) -> str:
+        return (
+            "<b>Пороги отправки</b>\n"
+            f"Компании {self.memory.threshold('notify_company')} · "
+            f"Заказы {self.memory.threshold('notify_order')} · "
+            f"Сводка {self.memory.threshold('digest')}\n"
+            "Выше порога — присылаю сразу, ниже — в сводке."
+        )
+
+    @staticmethod
+    def thresholds_keyboard() -> dict:
+        rows = []
+        for label, name in (("Компании", "notify_company"), ("Заказы", "notify_order"), ("Сводка", "digest")):
+            rows.append([
+                {"text": f"− {label}", "callback_data": f"t:{name}:-5"},
+                {"text": f"+ {label}", "callback_data": f"t:{name}:5"},
+            ])
+        return {"inline_keyboard": rows}
+
+    async def ask(self, action: str) -> None:
+        self.db.put("pending", action)
+        await self.bot.send(ASK.get(action, "Пришли значение"), {"force_reply": True, "input_field_placeholder": "Ответь сюда"})
+
     async def text(self, text: str, chat_id: str) -> None:
+        action = BUTTONS.get(text.strip())
+        if action:
+            self.db.put("pending", None)
+            await self.run_action(action)
+            return
+        pending = self.db.get("pending")
+        if pending:
+            self.db.put("pending", None)
+            handler = getattr(self, f"cmd_{pending}", None)
+            if handler:
+                await self.guard(handler, text.strip())
+                return
         directive_id = self.memory.add_directive(text)
-        await self.bot.send(f"Запомнил директиву #{directive_id}: {esc(clip(text, 300))}\nУчту при оценке лидов. Удалить: /forget {directive_id}")
+        await self.bot.send(f"Запомнил: {esc(clip(text, 200))}\nУдалить: /forget {directive_id}")
 
     async def command(self, text: str, chat_id: str) -> None:
         match = re.match(r"^/(\w+)(?:@\w+)?\s*(.*)$", text, re.S)
@@ -127,16 +213,26 @@ class App:
         if not handler:
             await self.bot.send("Не знаю такой команды. /help")
             return
+        self.db.put("pending", None)
+        await self.guard(handler, arg)
+
+    async def guard(self, handler, arg: str) -> None:
         try:
             await handler(arg)
         except BudgetExceeded:
             await self.bot.send("Дневной лимит расходов на ИИ исчерпан. Подними DAILY_BUDGET_USD или подожди до завтра.")
         except Exception as exc:
-            log.exception("command %s failed", cmd)
+            log.exception("handler failed")
             await self.bot.send(f"Ошибка: {esc(clip(str(exc), 300))}")
 
     async def cmd_start(self, arg: str) -> None:
-        await self.bot.send(HELP)
+        await self.bot.send(HELP, menu_keyboard())
+
+    async def cmd_menu(self, arg: str) -> None:
+        await self.bot.send("Меню снизу.", menu_keyboard())
+
+    async def cmd_more(self, arg: str) -> None:
+        await self.bot.send("Что сделать?", more_keyboard(self.paused()))
 
     async def cmd_help(self, arg: str) -> None:
         await self.bot.send(HELP)
@@ -144,47 +240,52 @@ class App:
     async def cmd_stats(self, arg: str) -> None:
         day = time.time() - 86400
         week = time.time() - 7 * 86400
-        lines = ["<b>Статистика</b>"]
+        lines = []
         for kind, label in (("company", "Компании"), ("order", "Заказы")):
             d = self.db.one("SELECT COUNT(*) AS n, SUM(CASE WHEN notified_at IS NOT NULL THEN 1 ELSE 0 END) AS s FROM leads WHERE kind = ? AND created_at > ?", kind, day)
-            w = self.db.one("SELECT COUNT(*) AS n, SUM(CASE WHEN notified_at IS NOT NULL THEN 1 ELSE 0 END) AS s FROM leads WHERE kind = ? AND created_at > ?", kind, week)
-            lines.append(f"{label}: 24ч — найдено {d['n']}, отправлено {d['s'] or 0}; 7д — {w['n']} / {w['s'] or 0}")
+            lines.append(f"{label}: {d['n']} найдено, {d['s'] or 0} прислал")
         fb = self.db.all("SELECT verdict, COUNT(*) AS n FROM feedback WHERE updated_at > ? GROUP BY verdict", week)
         counts = {r["verdict"]: r["n"] for r in fb}
-        lines.append("Оценки за 7д: " + ", ".join(f"{VERDICTS[v]} {counts.get(v, 0)}" for v in VERDICTS))
         queue = self.db.one("SELECT COUNT(*) AS n FROM candidates WHERE status = 'queued'")
-        lines.append(f"В очереди на аудит: {queue['n']} компаний")
-        lines.append(
-            f"Пороги: компании {self.memory.threshold('notify_company')}, заказы {self.memory.threshold('notify_order')}, сводка {self.memory.threshold('digest')}"
-        )
         usage = self.db.usage()
-        lines.append(f"ИИ сегодня: ${usage['cost']:.3f} ({usage['calls']} запросов), месяц: ${self.db.usage_month():.2f}, лимит/день: ${self.settings.daily_budget_usd}")
-        lines.append(f"Telegram-чаты: {'подключены' if self.tg.client else 'не подключены'}")
+        lines.append("Оценки за неделю: " + ", ".join(f"{VERDICTS[v]} {counts.get(v, 0)}" for v in VERDICTS))
+        lines.append(f"В очереди {queue['n']} · ${usage['cost']:.2f} сегодня, ${self.db.usage_month():.2f} за месяц")
         if self.paused():
-            lines.append("<b>Поиск на паузе</b> — /resume")
-        await self.bot.send("\n".join(lines))
+            lines.append("⏸ Поиск на паузе")
+        await self.bot.send("<b>За сутки</b>\n" + "\n".join(lines), more_keyboard(self.paused()))
 
     async def cmd_sources(self, arg: str) -> None:
-        stats = self.memory.arm_stats(include_inactive=True)
+        stats = [s for s in self.memory.arm_stats(include_inactive=True) if s["leads"] or not s["active"]]
         stats.sort(key=lambda s: (-s["active"], -s["mean"], -s["leads"]))
-        lines = ["<b>Источники и ниши</b> (качество · найдено/показано · мусор/хорошие)"]
-        for s in stats[:50]:
+        if not stats:
+            await self.bot.send("Пока ничего не нашёл — источники только раскручиваются.")
+            return
+        rows = []
+        for s in stats[:12]:
             good = s["interesting"] + s["taken"] + s["won"]
-            flag = "" if s["active"] else " [выкл]"
-            lines.append(f"{s['mean']:.2f} · {s['leads']}/{s['shown']} · {s['trash']}/{good} — {esc(s['label'])}{flag}\n<code>{esc(s['id'])}</code>")
-        if len(stats) > 50:
-            lines.append(f"…и ещё {len(stats) - 50}")
-        await self.bot.send("\n".join(lines))
+            mark = "" if s["active"] else "⏸ "
+            rows.append([
+                {"text": f"{mark}{clip(s['label'], 26)} · {s['leads']}/{good}", "callback_data": "noop"},
+                {"text": "Вкл" if not s["active"] else "Выкл", "callback_data": f"a:{int(not s['active'])}:{s['id']}"[:64]},
+            ])
+        more = f"\nПоказал {min(12, len(stats))} из {len(stats)}" if len(stats) > 12 else ""
+        await self.bot.send(f"<b>Источники</b> · найдено/понравилось{more}", {"inline_keyboard": rows})
 
     async def cmd_rules(self, arg: str) -> None:
         rules = self.memory.rules()
         directives = self.memory.directives()
-        lines = ["<b>Твои директивы</b>"]
-        lines += [f"{d['id']}. {esc(d['text'])}" for d in directives] or ["нет"]
-        lines.append("")
-        lines.append("<b>Выученные правила</b>")
-        lines += [f"• {esc(r)}" for r in rules] or ["пока нет — появятся после первых оценок"]
-        await self.bot.send("\n".join(lines))
+        lines = []
+        if directives:
+            lines.append("<b>Твои директивы</b>")
+            lines += [f"{d['id']}. {esc(clip(d['text'], 90))}" for d in directives]
+        if rules:
+            lines.append("")
+            lines.append("<b>Что я понял сам</b>")
+            lines += [f"• {esc(clip(r, 110))}" for r in rules[:12]]
+        if not lines:
+            lines = ["Правил пока нет. Оценивай лиды кнопками — они появятся.", "Любой текст сюда станет директивой."]
+        rows = [[{"text": f"Удалить {d['id']}", "callback_data": f"d:{d['id']}"}] for d in directives[:6]]
+        await self.bot.send("\n".join(lines), {"inline_keyboard": rows} if rows else None)
 
     async def cmd_forget(self, arg: str) -> None:
         ok = arg.isdigit() and self.memory.remove_directive(int(arg))
@@ -196,17 +297,17 @@ class App:
 
     async def cmd_pause(self, arg: str) -> None:
         self.db.put("paused", True)
-        await self.bot.send("Поиск на паузе. /resume — продолжить")
+        await self.bot.send("⏸ Пауза", more_keyboard(True))
 
     async def cmd_resume(self, arg: str) -> None:
         self.db.put("paused", False)
-        await self.bot.send("Продолжаю поиск")
+        await self.bot.send("▶️ Ищу дальше", more_keyboard(False))
 
     async def cmd_digest(self, arg: str) -> None:
         await self.digest(force=True)
 
     async def cmd_reflect(self, arg: str) -> None:
-        await self.bot.send("Разбираю итоги…")
+        await self.bot.send("Разбираю…")
         await reflect(self)
 
     async def cmd_audit(self, arg: str) -> None:
@@ -214,7 +315,7 @@ class App:
         if not url:
             await self.bot.send("Формат: /audit example.ru")
             return
-        await self.bot.send(f"Проверяю {esc(url)}…")
+        await self.bot.send(f"Смотрю {esc(url)}…")
         lead_id = await self.companies.manual(url)
         if not lead_id:
             await self.bot.send("Не получилось оценить сайт")
@@ -228,16 +329,16 @@ class App:
             await self.bot.send("Формат: /parse стоматология | Казань 30")
             return
         niche, city, limit = match.group(1), match.group(2), int(match.group(3) or 20)
-        await self.bot.send(f"Запускаю парсер: {esc(niche)} · {esc(city)}, до {limit} компаний…")
+        await self.bot.send(f"Ищу: {esc(niche)} · {esc(city)}…")
         added = await self.companies.parser_request(niche, city, limit, origin="user")
-        await self.bot.send(f"В очередь на оценку: {added} компаний без сайта. Подходящие пришлю. Лимит на сегодня: ещё {self.companies.parser.left_today()}")
+        await self.bot.send(f"+{added} компаний в очередь. Подходящие пришлю.")
 
     async def cmd_lead(self, arg: str) -> None:
         lead = self.db.lead(int(arg)) if arg.isdigit() else None
         if not lead:
             await self.bot.send("Нет такого лида")
             return
-        await self.send_card(lead)
+        await self.bot.send(lead_text(lead, True), keyboard(lead["id"], lead.get("verdict"), True, lead.get("url")))
 
     async def cmd_addniche(self, arg: str) -> None:
         niche = arg.strip().lower()
@@ -246,8 +347,8 @@ class App:
             return
         cities = self.memory.cities()
         added = sum(1 for city in cities if self.memory.add_niche_arm(niche, city))
-        note = "" if niche in NICHE_TAGS else "\nOSM-тегов для неё не знаю — искать буду через 2ГИС/Яндекс, если ключи есть. Иначе предложу теги на разборе итогов."
-        await self.bot.send(f"Ниша «{esc(niche)}» добавлена в {added} городах{note}")
+        note = "" if niche in NICHE_TAGS else "\nТегов OSM для неё нет — поищу через 2ГИС или предложу теги на разборе."
+        await self.bot.send(f"«{esc(niche)}» · {added} городов{note}")
 
     async def cmd_addcity(self, arg: str) -> None:
         city = arg.strip()
@@ -256,14 +357,14 @@ class App:
             return
         niches = self.memory.niches()
         added = sum(1 for niche in niches if self.memory.add_niche_arm(niche, city))
-        await self.bot.send(f"Город {esc(city)}: добавлено {added} ниш")
+        await self.bot.send(f"{esc(city)} · {added} ниш")
 
     async def cmd_addchat(self, arg: str) -> None:
         if not arg:
             await self.bot.send("Формат: /addchat @chat_username")
             return
         ok = self.memory.add_chat_arm(arg)
-        extra = "" if self.tg.client else "\nTelegram-аккаунт не подключён — см. README, шаг tg-login."
+        extra = "" if self.tg.client else "\nTelegram-аккаунт не подключён, читать не смогу."
         await self.bot.send(("Читаю " if ok else "Уже читаю ") + esc(arg) + extra)
 
     async def cmd_addrss(self, arg: str) -> None:
@@ -299,22 +400,12 @@ class App:
         await self.bot.send(f"Порог {parts[0]} = {value}")
 
     async def digest(self, force: bool = False) -> None:
-        leads = self.db.leads("l.status = 'digest' AND l.digest_at IS NULL", order="l.score DESC", limit=40)
+        leads = self.db.leads("l.status = 'digest' AND l.digest_at IS NULL", order="l.score DESC", limit=30)
         if not leads:
             if force:
-                await self.bot.send("В сводке пусто — всё важное уже отправил сразу.")
+                await self.bot.send("Пусто — всё важное прислал сразу.")
             return
-        lines = [f"<b>Сводка: {len(leads)} лидов ниже порога</b>", "Открыть карточку с кнопками — /lead_N", ""]
-        companies = [l for l in leads if l["kind"] == "company"]
-        orders = [l for l in leads if l["kind"] == "order"]
-        if companies:
-            lines.append("<b>Компании</b>")
-            lines += digest_lines(companies)
-            lines.append("")
-        if orders:
-            lines.append("<b>Заказы</b>")
-            lines += digest_lines(orders)
-        await self.bot.send("\n".join(lines))
+        await self.bot.send(f"<b>Сводка · {len(leads)}</b>", {"inline_keyboard": digest_rows(leads)})
         now = time.time()
         for lead in leads:
             self.db.set_lead_status(lead["id"], "digest", digest_at=now)
@@ -379,7 +470,7 @@ class App:
         if not self.settings.owner_id:
             log.warning("TELEGRAM_OWNER_ID не задан: напиши боту /start, он пришлёт твой id")
         else:
-            await self.bot.send("Агент запущен. /help — команды, /stats — статистика.")
+            await self.bot.send("Агент запущен.", menu_keyboard())
         s = self.settings.section("schedule")
         tasks = [
             self.bot.poll_forever(),
